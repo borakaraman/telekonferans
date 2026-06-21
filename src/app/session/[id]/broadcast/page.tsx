@@ -14,13 +14,15 @@ import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
 import LanguageSelector from "../watch/components/LanguageSelector";
+import VoiceSelector from "../watch/components/VoiceSelector";
 import TranscriptView from "@/components/TranscriptView";
 import VideoStage from "@/components/VideoStage";
 import AudioGate from "@/components/AudioGate";
+import { DEFAULT_VOICE } from "@/lib/voices";
 
 interface TranslationInfo {
   language: string;
-  translatorIdentity: string;
+  voice: string;
   status: string;
   subscriberCount: number;
 }
@@ -176,33 +178,34 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
   // Turkish). It's always active and freely changeable; they never hear their
   // own voice translated.
   const [listenLanguage, setListenLanguage] = useState("tr");
-  const ownTranslator = `translator-${listenLanguage}-organizer-host`;
+  const [listenVoice, setListenVoice] = useState(DEFAULT_VOICE);
+  const ownTranslator = `translator-${listenLanguage}-${listenVoice}-organizer-host`;
 
-  // Keep a bridge alive for the selected language; cleanup unsubscribes
+  // Keep a bridge alive for the selected (language, voice); cleanup unsubscribes
   // (strict-mode safe: sub → unsub → sub nets one subscription).
   useEffect(() => {
     if (listenLanguage === "original") return;
     fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, targetLanguage: listenLanguage }),
+      body: JSON.stringify({ sessionId, targetLanguage: listenLanguage, voice: listenVoice }),
     }).catch(() => {});
     return () => {
       fetch("/api/translate/unsubscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, targetLanguage: listenLanguage }),
+        body: JSON.stringify({ sessionId, targetLanguage: listenLanguage, voice: listenVoice }),
         keepalive: true,
       }).catch(() => {});
     };
-  }, [listenLanguage, sessionId]);
+  }, [listenLanguage, listenVoice, sessionId]);
 
   useEffect(() => {
     const onUnload = () => {
       if (listenLanguage !== "original") {
         navigator.sendBeacon?.(
           "/api/translate/unsubscribe",
-          new Blob([JSON.stringify({ sessionId, targetLanguage: listenLanguage })], {
+          new Blob([JSON.stringify({ sessionId, targetLanguage: listenLanguage, voice: listenVoice })], {
             type: "application/json",
           })
         );
@@ -210,7 +213,7 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
     };
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [listenLanguage, sessionId]);
+  }, [listenLanguage, listenVoice, sessionId]);
 
   // Subscribe to the right tracks: "original" → other human speakers; a language
   // → that language's translator bots, excluding the organizer's own voice.
@@ -218,7 +221,7 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
     if (!room) return;
 
     const updateSubscriptions = () => {
-      const langPrefix = `translator-${listenLanguage}-`;
+      const langPrefix = `translator-${listenLanguage}-${listenVoice}-`;
 
       for (const [, participant] of room.remoteParticipants) {
         const isTranslator = participant.identity.startsWith("translator-");
@@ -250,7 +253,7 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
       room.off(RoomEvent.TrackPublished, handleUpdate);
       room.off(RoomEvent.ParticipantConnected, handleUpdate);
     };
-  }, [room, listenLanguage, ownTranslator, remoteParticipants]);
+  }, [room, listenLanguage, listenVoice, ownTranslator, remoteParticipants]);
 
   // Count only real attendees, not translator bots
   const listenerCount = remoteParticipants.filter(
@@ -381,6 +384,16 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
             <p className="body-sm italic" style={{ marginTop: 8 }}>
               Söz verdiğiniz kişiler konuştuğunda seçtiğiniz dilde duyarsınız.
             </p>
+            <div style={{ marginTop: 14 }}>
+              <span className="label" style={{ display: "block", marginBottom: 8 }}>
+                Çeviri sesi
+              </span>
+              <VoiceSelector
+                currentVoice={listenVoice}
+                onVoiceChange={setListenVoice}
+                disabled={listenLanguage === "original"}
+              />
+            </div>
           </div>
 
           <div className="panel">
@@ -408,11 +421,14 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
                 Çeviriler · {translations.length}
               </span>
               {translations.map((t) => (
-                <div key={t.language} className="lang-row">
+                <div key={`${t.language}-${t.voice}`} className="lang-row">
                   <div className="lang-row-left">
                     <span className="lang-flag">{FLAGS[t.language] || "🌐"}</span>
                     <span className="lang-name">
                       {LANG_NAMES[t.language] || t.language.toUpperCase()}
+                      <span className="lang-meta" style={{ marginLeft: 6 }}>
+                        · {t.voice}
+                      </span>
                     </span>
                   </div>
                   <span className="lang-meta">
@@ -427,7 +443,7 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
             <span className="label" style={{ display: "block", marginBottom: 12 }}>
               Metin (konuşulan + çeviri)
             </span>
-            <TranscriptView language={listenLanguage} excludeSpeaker="organizer-host" />
+            <TranscriptView language={listenLanguage} voice={listenVoice} excludeSpeaker="organizer-host" />
           </div>
         </div>
       </div>

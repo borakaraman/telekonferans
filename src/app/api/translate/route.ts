@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import TranslationSessionManager from "@/lib/translation-session-manager";
+import { DEFAULT_VOICE, isValidVoice } from "@/lib/voices";
 
-// POST /api/translate — Request a translation stream for a language
+// POST /api/translate — Request a translation stream for a (language, voice)
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, targetLanguage, previousLanguage } = await req.json();
+    const { sessionId, targetLanguage, voice, previousLanguage, previousVoice } =
+      await req.json();
 
     if (!sessionId || !targetLanguage) {
       return NextResponse.json(
@@ -12,6 +14,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Pin to a known voice; ignore anything unexpected from the client.
+    const safeVoice = isValidVoice(voice) ? voice : DEFAULT_VOICE;
 
     const manager = TranslationSessionManager.getInstance();
     const session = manager.getSession(sessionId);
@@ -23,9 +28,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Unsubscribe from the previous language if switching
+    // Unsubscribe from the previous (language, voice) if switching
     if (previousLanguage && previousLanguage !== "original") {
-      await manager.unsubscribe(sessionId, previousLanguage);
+      const prevVoice = isValidVoice(previousVoice) ? previousVoice : DEFAULT_VOICE;
+      await manager.unsubscribe(sessionId, previousLanguage, prevVoice);
     }
 
     // Skip translation for the original language (no bridge needed)
@@ -37,12 +43,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Ensure a bridge exists for every speaker in this language
-    const info = await manager.getOrCreate(sessionId, targetLanguage);
+    // Ensure a bridge exists for every speaker in this (language, voice)
+    const info = await manager.getOrCreate(sessionId, targetLanguage, safeVoice);
 
     return NextResponse.json({
       status: info.status,
       targetLanguage: info.language,
+      voice: info.voice,
       speakerCount: info.speakerCount,
     });
   } catch (error) {
@@ -57,7 +64,7 @@ export async function POST(req: NextRequest) {
 // DELETE /api/translate — Unsubscribe from a translation (e.g. on disconnect)
 export async function DELETE(req: NextRequest) {
   try {
-    const { sessionId, targetLanguage } = await req.json();
+    const { sessionId, targetLanguage, voice } = await req.json();
 
     if (!sessionId || !targetLanguage) {
       return NextResponse.json(
@@ -66,8 +73,9 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
+    const safeVoice = isValidVoice(voice) ? voice : DEFAULT_VOICE;
     const manager = TranslationSessionManager.getInstance();
-    await manager.unsubscribe(sessionId, targetLanguage);
+    await manager.unsubscribe(sessionId, targetLanguage, safeVoice);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -13,6 +13,7 @@ import { TranslationBridge, BridgeStatus } from "./translation-bridge";
 
 export interface TranslationInfo {
   language: string;
+  voice: string;
   status: BridgeStatus;
   subscriberCount: number;
   speakerCount: number;
@@ -41,10 +42,19 @@ export interface FloorState {
   requests: FloorRequest[];
 }
 
-// All bridges for one language in one session, plus how many listeners want it.
+// All bridges for one (language, voice) combo in one session, plus how many
+// listeners want it. Listeners who pick the same language but a different voice
+// get a separate group (and separate Gemini sessions).
 interface LanguageGroup {
+  language: string;
+  voice: string;
   subscriberCount: number;
   bridges: Map<string, TranslationBridge>; // keyed by speaker identity
+}
+
+/** Map key for a (language, voice) group. Neither part contains "::". */
+function groupKey(language: string, voice: string): string {
+  return `${language}::${voice}`;
 }
 
 // Store the singleton on globalThis so it survives Next.js dev HMR reloads and
@@ -154,8 +164,8 @@ class TranslationSessionManager {
 
     const langMap = this.translations.get(sessionId);
     if (langMap) {
-      for (const [language, group] of langMap) {
-        await this.ensureBridge(sessionId, language, identity, group);
+      for (const [, group] of langMap) {
+        await this.ensureBridge(sessionId, identity, group);
       }
     }
     console.log(`[SessionManager] Granted floor to ${identity} in ${sessionId}`);
@@ -203,7 +213,6 @@ class TranslationSessionManager {
    */
   private async ensureBridge(
     sessionId: string,
-    language: string,
     speaker: string,
     group: LanguageGroup
   ): Promise<void> {
@@ -215,14 +224,20 @@ class TranslationSessionManager {
       group.bridges.delete(speaker);
     }
 
-    const bridge = new TranslationBridge(sessionId, language, speaker, this.buildConfig());
+    const bridge = new TranslationBridge(
+      sessionId,
+      group.language,
+      group.voice,
+      speaker,
+      this.buildConfig()
+    );
     group.bridges.set(speaker, bridge); // reserve the slot before the first await
     try {
       await bridge.start();
     } catch (error) {
       group.bridges.delete(speaker);
       console.error(
-        `[SessionManager] Failed to start bridge ${language}/${speaker}:`,
+        `[SessionManager] Failed to start bridge ${group.language}/${group.voice}/${speaker}:`,
         error
       );
     }
@@ -234,7 +249,8 @@ class TranslationSessionManager {
    */
   async getOrCreate(
     sessionId: string,
-    targetLanguage: string
+    targetLanguage: string,
+    voice: string
   ): Promise<TranslationInfo> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
@@ -245,22 +261,24 @@ class TranslationSessionManager {
       this.translations.set(sessionId, langMap);
     }
 
-    let group = langMap.get(targetLanguage);
+    const key = groupKey(targetLanguage, voice);
+    let group = langMap.get(key);
     if (!group) {
-      group = { subscriberCount: 0, bridges: new Map() };
-      langMap.set(targetLanguage, group);
+      group = { language: targetLanguage, voice, subscriberCount: 0, bridges: new Map() };
+      langMap.set(key, group);
     }
     group.subscriberCount++;
 
     // One bridge per current speaker
     await Promise.all(
       Array.from(session.speakers).map((speaker) =>
-        this.ensureBridge(sessionId, targetLanguage, speaker, group!)
+        this.ensureBridge(sessionId, speaker, group!)
       )
     );
 
     return {
       language: targetLanguage,
+      voice,
       status: "active",
       subscriberCount: group.subscriberCount,
       speakerCount: group.bridges.size,
@@ -272,7 +290,7 @@ class TranslationSessionManager {
     if (!langMap) return [];
 
     const result: TranslationInfo[] = [];
-    for (const [language, group] of langMap) {
+    for (const [, group] of langMap) {
       let status: BridgeStatus = "starting";
       for (const [, bridge] of group.bridges) {
         if (bridge.status === "active") {
@@ -281,7 +299,8 @@ class TranslationSessionManager {
         }
       }
       result.push({
-        language,
+        language: group.language,
+        voice: group.voice,
         status,
         subscriberCount: group.subscriberCount,
         speakerCount: group.bridges.size,
@@ -294,45 +313,34 @@ class TranslationSessionManager {
    * Decrement subscriber count for a language. If the last listener leaves,
    * tear down all of that language's bridges.
    */
-  async unsubscribe(sessionId: string, targetLanguage: string): Promise<void> {
+  async unsubscribe(
+    sessionId: string,
+    targetLanguage: string,
+    voice: string
+  ): Promise<void> {
     const langMap = this.translations.get(sessionId);
     if (!langMap) return;
 
-    const group = langMap.get(targetLanguage);
+    const key = groupKey(targetLanguage, voice);
+    const group = langMap.get(key);
     if (!group) return;
 
     group.subscriberCount = Math.max(0, group.subscriberCount - 1);
     console.log(
-      `[SessionManager] Unsubscribed from ${targetLanguage} in session ${sessionId} (${group.subscriberCount} remaining)`
+      `[SessionManager] Unsubscribed from ${targetLanguage}/${voice} in session ${sessionId} (${group.subscriberCount} remaining)`
     );
 
     if (group.subscriberCount === 0) {
       console.log(
-        `[SessionManager] No more subscribers for ${targetLanguage}, tearing down ${group.bridges.size} bridge(s)`
+        `[SessionManager] No more subscribers for ${targetLanguage}/${voice}, tearing down ${group.bridges.size} bridge(s)`
       );
       for (const [, bridge] of group.bridges) {
         await bridge.stop();
       }
-      langMap.delete(targetLanguage);
+      langMap.delete(key);
       if (langMap.size === 0) {
         this.translations.delete(sessionId);
       }
-    }
-  }
-
-  async removeTranslation(sessionId: string, targetLanguage: string): Promise<void> {
-    const langMap = this.translations.get(sessionId);
-    if (!langMap) return;
-
-    const group = langMap.get(targetLanguage);
-    if (group) {
-      for (const [, bridge] of group.bridges) {
-        await bridge.stop();
-      }
-      langMap.delete(targetLanguage);
-      console.log(
-        `[SessionManager] Removed all bridges for ${targetLanguage} in session ${sessionId}`
-      );
     }
   }
 

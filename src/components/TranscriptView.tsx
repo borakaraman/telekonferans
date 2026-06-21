@@ -20,9 +20,12 @@ interface TranscriptEntry {
  */
 export default function TranscriptView({
   language,
+  voice,
   excludeSpeaker,
 }: {
   language: string;
+  /** Only show transcripts from this voice's bridges (matches the heard audio). */
+  voice?: string;
   /** Don't show this speaker's lines (e.g. the local user's own speech). */
   excludeSpeaker?: string;
 }) {
@@ -30,6 +33,7 @@ export default function TranscriptView({
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
   const langRef = useRef(language);
+  const voiceRef = useRef(voice);
   const excludeRef = useRef(excludeSpeaker);
 
   // Track the selected language; clear transcripts when it changes.
@@ -37,6 +41,12 @@ export default function TranscriptView({
     langRef.current = language;
     setTranscripts([]);
   }, [language]);
+
+  // Voice change → different bridges/segment ids, so clear and re-filter.
+  useEffect(() => {
+    voiceRef.current = voice;
+    setTranscripts([]);
+  }, [voice]);
 
   useEffect(() => {
     excludeRef.current = excludeSpeaker;
@@ -57,6 +67,9 @@ export default function TranscriptView({
         if (data.type !== "transcription") return;
         // Only show transcripts for the currently selected language
         if (data.language !== langRef.current) return;
+        // Only the chosen voice's bridges (avoids duplicate text when other
+        // listeners picked a different voice for the same language).
+        if (voiceRef.current && data.voice && data.voice !== voiceRef.current) return;
         // Optionally hide our own speech (we don't translate ourselves)
         if (excludeRef.current && data.speaker === excludeRef.current) return;
 

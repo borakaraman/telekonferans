@@ -13,9 +13,11 @@ import {
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
 import LanguageSelector from "./components/LanguageSelector";
+import VoiceSelector from "./components/VoiceSelector";
 import TranscriptView from "@/components/TranscriptView";
 import VideoStage from "@/components/VideoStage";
 import AudioGate from "@/components/AudioGate";
+import { DEFAULT_VOICE } from "@/lib/voices";
 
 type SpeakState = "idle" | "requested" | "speaking";
 
@@ -176,6 +178,8 @@ function AttendeeView({
   const room = useRoomContext();
   // Default English — translates immediately; user can change it freely.
   const [language, setLanguage] = useState("en");
+  // Each listener picks the voice they hear the translation in.
+  const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
   const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
@@ -186,26 +190,26 @@ function AttendeeView({
 
   // Our own translator bot (exists only while we hold the floor) — we never
   // listen to our own translation.
-  const ownTranslator = `translator-${language}-${identity}`;
+  const ownTranslator = `translator-${language}-${voice}-${identity}`;
 
-  // Keep a bridge alive for the selected language while it's selected.
+  // Keep a bridge alive for the selected (language, voice) while selected.
   // Cleanup unsubscribes on change/unmount (strict-mode safe: sub→unsub→sub).
   useEffect(() => {
     if (language === "original") return;
     fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, targetLanguage: language }),
+      body: JSON.stringify({ sessionId, targetLanguage: language, voice }),
     }).catch(() => {});
     return () => {
       fetch("/api/translate/unsubscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, targetLanguage: language }),
+        body: JSON.stringify({ sessionId, targetLanguage: language, voice }),
         keepalive: true,
       }).catch(() => {});
     };
-  }, [language, sessionId]);
+  }, [language, voice, sessionId]);
 
   // Reliable unsubscribe on real tab close (effect cleanup may not run then).
   useEffect(() => {
@@ -213,7 +217,7 @@ function AttendeeView({
       if (language !== "original") {
         navigator.sendBeacon?.(
           "/api/translate/unsubscribe",
-          new Blob([JSON.stringify({ sessionId, targetLanguage: language })], {
+          new Blob([JSON.stringify({ sessionId, targetLanguage: language, voice })], {
             type: "application/json",
           })
         );
@@ -221,18 +225,18 @@ function AttendeeView({
     };
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [language, sessionId]);
+  }, [language, voice, sessionId]);
 
   // Manage which audio/video tracks are subscribed
   useEffect(() => {
     if (!room) return;
 
     const updateSubscriptions = () => {
-      const langPrefix = `translator-${language}-`;
+      const langPrefix = `translator-${language}-${voice}-`;
 
       for (const [, participant] of room.remoteParticipants) {
         const isTranslator = participant.identity.startsWith("translator-");
-        // Every speaker translated into the chosen language, except our own voice.
+        // Every speaker translated into the chosen language+voice, except ours.
         const isOtherLangTranslator =
           participant.identity.startsWith(langPrefix) &&
           participant.identity !== ownTranslator;
@@ -262,7 +266,7 @@ function AttendeeView({
       room.off(RoomEvent.TrackPublished, handleUpdate);
       room.off(RoomEvent.ParticipantConnected, handleUpdate);
     };
-  }, [room, language, ownTranslator, remoteParticipants]);
+  }, [room, language, voice, ownTranslator, remoteParticipants]);
 
   useEffect(() => {
     const hasAudio = audioTracks.some((t) => {
@@ -271,13 +275,13 @@ function AttendeeView({
         return !t.participant.identity.startsWith("translator-") && pub.isSubscribed;
       }
       return (
-        t.participant.identity.startsWith(`translator-${language}-`) &&
+        t.participant.identity.startsWith(`translator-${language}-${voice}-`) &&
         t.participant.identity !== ownTranslator &&
         pub.isSubscribed
       );
     });
     setIsReceivingAudio(hasAudio);
-  }, [audioTracks, language, ownTranslator]);
+  }, [audioTracks, language, voice, ownTranslator]);
 
   const isConnected = organizerParticipant !== undefined;
 
@@ -328,6 +332,17 @@ function AttendeeView({
           </div>
 
           <div className="panel">
+            <span className="label" style={{ display: "block", marginBottom: 12 }}>
+              Çeviri sesi
+            </span>
+            <VoiceSelector
+              currentVoice={voice}
+              onVoiceChange={setVoice}
+              disabled={language === "original"}
+            />
+          </div>
+
+          <div className="panel">
             <SpeakControl sessionId={sessionId} identity={identity} />
           </div>
         </div>
@@ -338,7 +353,7 @@ function AttendeeView({
             <span className="label" style={{ display: "block", marginBottom: 12 }}>
               Metin (konuşulan + çeviri)
             </span>
-            <TranscriptView language={language} excludeSpeaker={identity} />
+            <TranscriptView language={language} voice={voice} excludeSpeaker={identity} />
           </div>
         </div>
       </div>

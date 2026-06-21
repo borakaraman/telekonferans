@@ -38,6 +38,7 @@ export class TranslationBridge {
   private framesReceivedFromGemini: number = 0;
 
   public readonly targetLanguage: string;
+  public readonly voice: string;
   public readonly sessionId: string;
   public readonly identity: string;
   public status: BridgeStatus = "starting";
@@ -70,6 +71,7 @@ export class TranslationBridge {
   constructor(
     sessionId: string,
     targetLanguage: string,
+    voice: string,
     speakerIdentity: string,
     config: {
       geminiApiKey: string;
@@ -80,9 +82,11 @@ export class TranslationBridge {
   ) {
     this.sessionId = sessionId;
     this.targetLanguage = targetLanguage;
+    this.voice = voice;
     this.speakerIdentity = speakerIdentity;
-    // One translator bot per (language, speaker): translator-{lang}-{speaker}
-    this.identity = `translator-${targetLanguage}-${speakerIdentity}`;
+    // One translator bot per (language, voice, speaker):
+    // translator-{lang}-{voice}-{speaker}
+    this.identity = `translator-${targetLanguage}-${voice}-${speakerIdentity}`;
     this.geminiApiKey = config.geminiApiKey;
     this.livekitUrl = config.livekitUrl;
     this.livekitApiKey = config.livekitApiKey;
@@ -341,6 +345,15 @@ export class TranslationBridge {
         outputAudioTranscription: {},
         generationConfig: {
           responseModalities: ["AUDIO"],
+          // Pin the output voice so every speaker/language/reconnect uses the
+          // same voice instead of a random one.
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: this.voice,
+              },
+            },
+          },
           translationConfig: {
             targetLanguageCode: this.targetLanguage,
             echoTargetLanguage: true,
@@ -728,8 +741,9 @@ export class TranslationBridge {
         type: "transcription",
         kind,
         language: this.targetLanguage,
+        voice: this.voice,
         speaker: this.speakerIdentity,
-        segmentId: `${kind}-${this.targetLanguage}-${this.speakerIdentity}-${this.transcriptionSegmentId}`,
+        segmentId: `${kind}-${this.targetLanguage}-${this.voice}-${this.speakerIdentity}-${this.transcriptionSegmentId}`,
         text,
         final: !interim,
         timestamp: Date.now(),
