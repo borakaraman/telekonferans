@@ -16,12 +16,41 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Only the verified session owner can join as the organizer (publisher).
+  // Reserved identity prefixes — only the server issues these. An attendee
+  // claiming "organizer-*" or "translator-*" would impersonate the host or a
+  // translator bot, so reject them outright for attendees.
+  const RESERVED_PREFIXES = ["organizer-", "translator-"];
+
+  // Identity must be a short, safe token (used as a LiveKit participant id).
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(identity)) {
+    return NextResponse.json(
+      { error: "Invalid identity format" },
+      { status: 400 }
+    );
+  }
+
+  const manager = TranslationSessionManager.getInstance();
+
   if (role === "organizer") {
-    const manager = TranslationSessionManager.getInstance();
+    // Only the verified session owner can join as the organizer (publisher).
     if (!manager.isHost(room, hostKey)) {
       return NextResponse.json(
         { error: "Invalid or missing host key for this session" },
+        { status: 403 }
+      );
+    }
+  } else {
+    // Attendees may only join a session that actually exists, and may not
+    // claim a reserved (organizer/translator) identity.
+    if (!manager.getSession(room)) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
+      );
+    }
+    if (RESERVED_PREFIXES.some((p) => identity.startsWith(p))) {
+      return NextResponse.json(
+        { error: "This identity is reserved" },
         { status: 403 }
       );
     }

@@ -113,12 +113,27 @@ class TranslationSessionManager {
 
   // ─── Floor (speaking permission) management ────────────────────────────
 
+  /** Upper bound on pending floor requests per session (anti-spam). */
+  private static readonly MAX_FLOOR_REQUESTS = 200;
+
   /** Record a "raise hand" request from an attendee. */
   addFloorRequest(sessionId: string, identity: string, name: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    // Reject malformed or reserved identities (defense-in-depth: floor POSTs
+    // don't carry a LiveKit token, so we can't trust the caller).
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(identity)) return;
+    if (identity.startsWith("organizer-") || identity.startsWith("translator-")) return;
     if (session.speakers.has(identity)) return; // already a speaker
-    session.floorRequests.set(identity, { identity, name, requestedAt: Date.now() });
+    // Cap pending requests so a flood can't grow the map unbounded.
+    if (
+      !session.floorRequests.has(identity) &&
+      session.floorRequests.size >= TranslationSessionManager.MAX_FLOOR_REQUESTS
+    ) {
+      return;
+    }
+    const safeName = (name || identity).slice(0, 80);
+    session.floorRequests.set(identity, { identity, name: safeName, requestedAt: Date.now() });
     console.log(`[SessionManager] Floor requested by ${identity} in ${sessionId}`);
   }
 
