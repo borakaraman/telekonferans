@@ -161,20 +161,33 @@ export class TranslationBridge {
 
     const token = await at.toJwt();
 
-    // Create and connect to the room
-    this.room = new Room();
+    // Create and connect to the room. Use a LOCAL `room` reference throughout
+    // so a concurrent stop() (which nulls this.room) can't cause a null deref
+    // mid-start — a race that previously crashed the bridge and left a language
+    // with no translator track (so audio never arrived until re-triggered).
+    const room = new Room();
+    this.room = room;
 
-    this.room.on(RoomEvent.Disconnected, () => {
+    room.on(RoomEvent.Disconnected, () => {
       console.log(
         `[TranslationBridge:${this.targetLanguage}] Disconnected from room`
       );
       this.status = "closed";
     });
 
-    await this.room.connect(this.livekitUrl, token, {
+    await room.connect(this.livekitUrl, token, {
       autoSubscribe: false,
       dynacast: false,
     });
+
+    // Aborted while connecting? Bail cleanly so we don't publish into a dead room.
+    if (this.status === "closed" || this.room !== room) {
+      try { await room.disconnect(); } catch {}
+      throw new Error("Bridge stopped during start");
+    }
+
+    const lp = room.localParticipant;
+    if (!lp) throw new Error("localParticipant unavailable after connect");
 
     console.log(
       `[TranslationBridge:${this.targetLanguage}] Joined room as ${this.identity}`
@@ -191,14 +204,10 @@ export class TranslationBridge {
     const publishOptions = new TrackPublishOptions();
     publishOptions.source = TrackSource.SOURCE_MICROPHONE;
 
-    await this.room.localParticipant!.publishTrack(
-      this.localTrack,
-      publishOptions
-    );
+    await lp.publishTrack(this.localTrack, publishOptions);
 
     // Save published track SID for transcription
-    const pubs = this.room.localParticipant!.trackPublications;
-    for (const [, pub] of pubs) {
+    for (const [, pub] of lp.trackPublications) {
       if (pub.track === this.localTrack) {
         this.publishedTrackSid = pub.sid || "";
         break;

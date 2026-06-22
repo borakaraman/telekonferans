@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
+import { motion } from "framer-motion";
+import { Mic, Languages } from "lucide-react";
 
 interface TranscriptEntry {
   id: string;
@@ -115,7 +117,7 @@ export default function TranscriptView({
 
   if (language === "original") {
     return (
-      <div className="panel-scroll">
+      <div className="panel-scroll" style={{ display: "grid", placeItems: "center" }}>
         <p className="body-sm italic">Metin için bir çeviri dili seçin.</p>
       </div>
     );
@@ -123,50 +125,124 @@ export default function TranscriptView({
 
   if (transcripts.length === 0) {
     return (
-      <div className="panel-scroll">
-        <p className="body-sm italic">Konuşma bekleniyor…</p>
+      <div className="panel-scroll" style={{ display: "grid", placeItems: "center" }}>
+        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <span className="status status--waiting" style={{ padding: "8px 14px" }}>
+            <span className="status-dot pulse" />
+            Konuşma bekleniyor
+          </span>
+          <p className="body-sm" style={{ maxWidth: 240 }}>
+            Konuşmacı konuştuğunda çeviri burada canlı olarak akacak.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="panel-scroll" style={{ paddingRight: 8 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div
+      className="panel-scroll"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      style={{
+        paddingRight: 8,
+        // depth: older lines fade out at the top edge
+        WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 26px)",
+        maskImage: "linear-gradient(to bottom, transparent 0, #000 26px)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 8 }}>
         {transcripts.map((t, i) => {
           const isSource = t.kind === "source";
-          return (
-            <div key={`${t.id}-${i}`}>
-              <span
-                className="label"
+          const who = speakerLabel(t.speaker);
+
+          if (isSource) {
+            return (
+              <motion.p
+                key={`${t.id}-${i}`}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
                 style={{
-                  display: "block",
-                  marginBottom: 2,
-                  color: isSource ? "var(--fg-ghost)" : "var(--success)",
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  fontStyle: "italic",
+                  color: "var(--fg-tertiary)",
                 }}
               >
-                {isSource ? "🗣 Konuşulan" : "🌐 Çeviri"}
-              </span>
-              <p
-                style={{
-                  fontFamily: "var(--font-body)",
-                  fontSize: 15,
-                  lineHeight: 1.6,
-                  fontStyle: isSource ? "italic" : "normal",
-                  color: isSource
-                    ? "var(--fg-tertiary)"
-                    : t.final
-                    ? "var(--fg)"
-                    : "var(--fg-tertiary)",
-                  transition: "color 0.3s ease",
-                }}
-              >
+                <Mic size={12} style={{ flexShrink: 0, transform: "translateY(2px)" }} />
                 {t.text}
-              </p>
-            </div>
+              </motion.p>
+            );
+          }
+
+          return (
+            <motion.div
+              key={`${t.id}-${i}`}
+              initial={{ opacity: 0, y: 10, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
+                <span className="avatar" style={{ width: 26, height: 26, fontSize: 10, fontWeight: 700 }}>
+                  {initials(who)}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{who}</span>
+                <span className="label" style={{ color: "var(--success)", letterSpacing: "0.1em" }}>
+                  <Languages size={11} /> Çeviri
+                </span>
+              </div>
+              <div
+                style={{
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02))",
+                  border: "1px solid var(--panel-border)",
+                  borderRadius: "4px 16px 16px 16px",
+                  padding: "12px 15px",
+                  boxShadow: "var(--e2, 0 6px 16px -6px rgba(0,0,0,0.55))",
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "var(--font-body)",
+                    fontSize: 17,
+                    lineHeight: 1.5,
+                    letterSpacing: "-0.01em",
+                    color: t.final ? "var(--fg)" : "var(--fg-2, var(--fg-secondary))",
+                    transition: "color 0.3s ease",
+                  }}
+                >
+                  {t.text}
+                  {!t.final && (
+                    <motion.span
+                      aria-hidden
+                      animate={{ opacity: [1, 0.2, 1] }}
+                      transition={{ duration: 1, repeat: Infinity }}
+                      style={{ display: "inline-block", width: 2, height: 16, background: "var(--accent)", marginLeft: 3, verticalAlign: "middle", borderRadius: 2 }}
+                    />
+                  )}
+                </p>
+              </div>
+            </motion.div>
           );
         })}
         <div ref={endRef} />
       </div>
     </div>
   );
+}
+
+/** Friendly speaker name from a LiveKit identity. */
+function speakerLabel(s: string): string {
+  if (!s) return "Konuşmacı";
+  if (s.startsWith("organizer")) return "Sunucu";
+  if (s.startsWith("attendee")) return "Konuk";
+  return s;
+}
+
+function initials(label: string): string {
+  return label.slice(0, 2).toUpperCase();
 }

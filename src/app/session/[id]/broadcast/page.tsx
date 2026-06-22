@@ -12,13 +12,28 @@ import {
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
-import SessionQRCode from "@/components/SessionQRCode";
-import LanguageSelector from "../watch/components/LanguageSelector";
+import { motion, AnimatePresence } from "framer-motion";
+import InviteDialog from "@/components/InviteDialog";
+import LanguagePicker from "../watch/components/LanguagePicker";
 import VoiceSelector from "../watch/components/VoiceSelector";
 import TranscriptView from "@/components/TranscriptView";
 import VideoStage from "@/components/VideoStage";
 import AudioGate from "@/components/AudioGate";
 import { DEFAULT_VOICE } from "@/lib/voices";
+import AIOrb, { type OrbState } from "@/design-system/AIOrb";
+import AmbientBlobs from "@/design-system/AmbientBlobs";
+import {
+  Radio,
+  Mic,
+  Users,
+  Hand,
+  Globe,
+  Languages,
+  AudioLines,
+  UserPlus,
+  UserMinus,
+  PhoneOff,
+} from "lucide-react";
 
 interface TranslationInfo {
   language: string;
@@ -114,21 +129,39 @@ function FloorPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div>
-      <span className="label" style={{ marginBottom: 12, display: "block" }}>
-        Katılımcılar · {attendees.length}
+      <span className="label" style={{ marginBottom: 12 }}>
+        <Users size={13} /> Katılımcılar · {attendees.length}
       </span>
       {attendees.length === 0 ? (
         <p className="body-sm italic">Henüz katılımcı yok</p>
       ) : (
-        attendees.map((p) => {
+        <AnimatePresence initial={false}>
+        {attendees.map((p) => {
           const id = p.identity;
           const isSpeaker = speakers.includes(id);
           const requested = requestedSet.has(id);
+          const isBusy = busy === id;
           return (
-            <div key={id} className="lang-row">
+            <motion.div
+              key={id}
+              className="lang-row"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              transition={{ duration: 0.25 }}
+            >
               <div className="lang-row-left">
-                <span className="lang-flag">
-                  {isSpeaker ? "🎤" : requested ? "✋" : "👤"}
+                <span
+                  className="avatar"
+                  style={
+                    isSpeaker
+                      ? { color: "var(--success)", background: "var(--success-soft)" }
+                      : requested
+                      ? { color: "var(--warning)", background: "var(--warning-soft)" }
+                      : undefined
+                  }
+                >
+                  {isSpeaker ? <Mic size={16} /> : requested ? <Hand size={16} /> : <Users size={16} />}
                 </span>
                 <span className="lang-name">
                   {p.name || id}
@@ -141,26 +174,27 @@ function FloorPanel({ sessionId }: { sessionId: string }) {
               </div>
               {isSpeaker ? (
                 <button
-                  className="btn-danger"
-                  disabled={busy === id}
+                  className="btn-pill btn-pill-danger"
+                  disabled={isBusy}
                   onClick={() => act("revoke", id)}
-                  style={{ padding: "6px 14px", fontSize: 12 }}
                 >
-                  Sözü bitir
+                  {isBusy ? <span className="spinner spinner-sm" /> : <UserMinus size={14} />}
+                  {isBusy ? "Kapatılıyor" : "Sözü bitir"}
                 </button>
               ) : (
                 <button
-                  className="btn"
-                  disabled={busy === id}
+                  className="btn-pill btn-pill-accent"
+                  disabled={isBusy}
                   onClick={() => act("grant", id)}
-                  style={{ padding: "6px 14px", fontSize: 12 }}
                 >
-                  Söz ver
+                  {isBusy ? <span className="spinner spinner-sm" /> : <UserPlus size={14} />}
+                  {isBusy ? "Açılıyor" : "Söz ver"}
                 </button>
               )}
-            </div>
+            </motion.div>
           );
-        })
+        })}
+        </AnimatePresence>
       )}
     </div>
   );
@@ -179,17 +213,24 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
   // own voice translated.
   const [listenLanguage, setListenLanguage] = useState("tr");
   const [listenVoice, setListenVoice] = useState(DEFAULT_VOICE);
+  const [preparing, setPreparing] = useState(false);
   const ownTranslator = `translator-${listenLanguage}-${listenVoice}-organizer-host`;
 
   // Keep a bridge alive for the selected (language, voice); cleanup unsubscribes
   // (strict-mode safe: sub → unsub → sub nets one subscription).
   useEffect(() => {
-    if (listenLanguage === "original") return;
+    if (listenLanguage === "original") {
+      setPreparing(false);
+      return;
+    }
+    setPreparing(true);
     fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, targetLanguage: listenLanguage, voice: listenVoice }),
-    }).catch(() => {});
+    })
+      .catch(() => {})
+      .finally(() => setPreparing(false));
     return () => {
       fetch("/api/translate/unsubscribe", {
         method: "POST",
@@ -288,26 +329,50 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
     setIsMicOn(hasAudio);
   }, [audioTracks, localParticipant.identity]);
 
+  const orbState: OrbState = preparing
+    ? "translating"
+    : isMicOn
+    ? "listening"
+    : "idle";
+
   return (
     <div className="stage enter">
+      <AmbientBlobs />
       {/* Header */}
       <div className="stage-header">
-        <div>
-          <h1 className="display display-md" style={{ marginBottom: 2 }}>
-            Broadcasting
-          </h1>
-          <p className="mono">{sessionId}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <AIOrb size={46} state={orbState} />
+          <div style={{ minWidth: 0 }}>
+            <h1 className="display display-md" style={{ marginBottom: 1 }}>
+              Yayın
+            </h1>
+            <p className="mono">{sessionId}</p>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <AnimatePresence>
+            {preparing && (
+              <motion.span
+                className="loading-pill"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.2 }}
+              >
+                <span className="spinner spinner-sm" />
+                Hazırlanıyor<span className="dots" />
+              </motion.span>
+            )}
+          </AnimatePresence>
           <span
             className="status"
             style={{ color: isMicOn ? "var(--success)" : "var(--fg-ghost)" }}
           >
             <span className={`status-dot ${isMicOn ? "pulse" : ""}`} />
-            {isMicOn ? "Live" : "Muted"}
+            {isMicOn ? "Canlı" : "Sessiz"}
           </span>
-          <span className="mono">
-            {listenerCount} listener{listenerCount !== 1 ? "s" : ""}
+          <span className="status">
+            <Users size={13} /> {listenerCount}
           </span>
           <button
             className="btn-danger"
@@ -315,78 +380,68 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
               room.disconnect();
               window.location.href = "/";
             }}
-            style={{ padding: "8px 18px", fontSize: 13 }}
           >
-            Bitir
+            <PhoneOff size={15} /> Bitir
           </button>
         </div>
       </div>
 
-      {/* Two-column dashboard — fits the viewport */}
-      <div className="stage-body">
-        {/* Left column: video + controls */}
+      {/* Host console — narrow control rail + dominant conversation */}
+      <div className="stage-body stage-body--console">
+        {/* Left rail — compact controls, participants, translations, invite */}
         <div className="stage-col stage-col--scroll">
-          <VideoStage />
-
+          {/* Compact control card */}
           <div className="panel">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Mikrofon / Ekran paylaşımı
+            <span className="label" style={{ marginBottom: 10 }}>
+              <Mic size={13} /> Mikrofon / Ekran
             </span>
-            <TrackToggle
-              source={Track.Source.Microphone}
-              style={{
-                width: "100%",
-                padding: "12px 20px",
-                fontFamily: "var(--font-body)",
-                fontSize: 14,
-                fontWeight: 500,
-                border: isMicOn ? "1px solid var(--error)" : "none",
-                borderRadius: 0,
-                background: isMicOn ? "transparent" : "var(--fg)",
-                color: isMicOn ? "var(--error)" : "var(--bg)",
-                cursor: "pointer",
-              }}
-            />
-            <TrackToggle
-              source={Track.Source.ScreenShare}
-              captureOptions={{ audio: true }}
-              style={{
-                width: "100%",
-                marginTop: 8,
-                padding: "12px 20px",
-                fontFamily: "var(--font-body)",
-                fontSize: 14,
-                fontWeight: 500,
-                border: "1px solid var(--fg)",
-                borderRadius: 0,
-                background: "transparent",
-                color: "var(--fg)",
-                cursor: "pointer",
-              }}
-            />
-            <p className="body-sm italic" style={{ marginTop: 8 }}>
-              YouTube/Zoom paylaşmak için <b>Chrome Sekmesi</b>’ni seçin ve
-              açılan pencerede <b>“Sekme sesini de paylaş”</b> kutusunu
-              işaretleyin. Sekme sesi otomatik olarak (mikrofonun yerine)
-              çevrilir; ekranı kapatınca mikrofona geri dönülür. Tüm
-              ekran/pencere paylaşımında tarayıcı sesi yakalayamaz.
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <TrackToggle
+                source={Track.Source.Microphone}
+                style={{
+                  padding: "11px 12px",
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: isMicOn ? "1px solid var(--error)" : "none",
+                  borderRadius: 10,
+                  background: isMicOn ? "transparent" : "var(--fg)",
+                  color: isMicOn ? "var(--error)" : "#0A0D14",
+                  cursor: "pointer",
+                }}
+              />
+              <TrackToggle
+                source={Track.Source.ScreenShare}
+                captureOptions={{ audio: true }}
+                style={{
+                  padding: "11px 12px",
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.02)",
+                  color: "var(--fg)",
+                  cursor: "pointer",
+                }}
+              />
+            </div>
+            <p className="body-sm" style={{ marginTop: 8, fontSize: 11.5 }}>
+              Sekme sesi için: <b>Chrome Sekmesi</b> + <b>“Sekme sesini paylaş”</b>.
             </p>
-          </div>
 
-          <div className="panel">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Dinleme dili
+            <div className="rule" style={{ margin: "15px 0" }} />
+
+            <span className="label" style={{ marginBottom: 9 }}>
+              <Languages size={13} /> Dinleme dili
             </span>
-            <LanguageSelector
+            <LanguagePicker
               currentLanguage={listenLanguage}
               onLanguageChange={setListenLanguage}
             />
-            <p className="body-sm italic" style={{ marginTop: 8 }}>
-              Söz verdiğiniz kişiler konuştuğunda seçtiğiniz dilde duyarsınız.
-            </p>
-            <div style={{ marginTop: 14 }}>
-              <span className="label" style={{ display: "block", marginBottom: 8 }}>
-                Çeviri sesi
+            <div style={{ marginTop: 9 }}>
+              <span className="label" style={{ marginBottom: 9 }}>
+                <AudioLines size={13} /> Çeviri sesi
               </span>
               <VoiceSelector
                 currentVoice={listenVoice}
@@ -396,54 +451,43 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
             </div>
           </div>
 
-          <div className="panel">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Davet — paylaş
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <SessionQRCode url={joinUrl} size={92} />
-              <p className="mono" style={{ wordBreak: "break-all", flex: 1 }}>
-                {joinUrl}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Right column: floor + translations + transcript (transcript scrolls) */}
-        <div className="stage-col">
+          {/* Participants */}
           <div className="panel">
             <FloorPanel sessionId={sessionId} />
           </div>
 
+          {/* Active translations — compact chips */}
           {translations.length > 0 && (
             <div className="panel">
-              <span className="label" style={{ marginBottom: 10, display: "block" }}>
-                Çeviriler · {translations.length}
+              <span className="label" style={{ marginBottom: 11 }}>
+                <Globe size={13} /> Etkin çeviriler · {translations.length}
               </span>
-              {translations.map((t) => (
-                <div key={`${t.language}-${t.voice}`} className="lang-row">
-                  <div className="lang-row-left">
-                    <span className="lang-flag">{FLAGS[t.language] || "🌐"}</span>
-                    <span className="lang-name">
-                      {LANG_NAMES[t.language] || t.language.toUpperCase()}
-                      <span className="lang-meta" style={{ marginLeft: 6 }}>
-                        · {t.voice}
-                      </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                {translations.map((t) => (
+                  <span key={`${t.language}-${t.voice}`} className="chip">
+                    <span style={{ fontSize: 14 }}>{FLAGS[t.language] || "🌐"}</span>
+                    {LANG_NAMES[t.language] || t.language.toUpperCase()}
+                    <span className="lang-meta" style={{ marginLeft: 1 }}>
+                      {t.voice} · {t.subscriberCount}
                     </span>
-                  </div>
-                  <span className="lang-meta">
-                    {t.subscriberCount} listener{t.subscriberCount !== 1 ? "s" : ""}
                   </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
+          {/* Invite */}
+          <InviteDialog url={joinUrl} />
+        </div>
+
+        {/* Main — screen share (if any) + dominant live transcript */}
+        <div className="stage-col">
+          <VideoStage />
           <div className="panel panel--fill">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Metin (konuşulan + çeviri)
+            <span className="label" style={{ marginBottom: 12 }}>
+              <Radio size={13} /> Canlı metin
             </span>
-            <TranscriptView language={listenLanguage} voice={listenVoice} excludeSpeaker="organizer-host" />
+            <TranscriptView language={listenLanguage} voice={listenVoice} />
           </div>
         </div>
       </div>
@@ -495,11 +539,11 @@ export default function BroadcastPage({
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
           <p className="display display-md" style={{ marginBottom: 16 }}>
-            Something went wrong
+            Bir sorun oluştu
           </p>
           <p className="body-sm" style={{ marginBottom: 32 }}>{error}</p>
           <button className="btn btn-outline" onClick={() => (window.location.href = "/")}>
-            Go home
+            Ana sayfa
           </button>
         </div>
       </div>
@@ -525,7 +569,7 @@ export default function BroadcastPage({
       connectOptions={{ autoSubscribe: false }}
       style={{ width: "100%", height: "100dvh" }}
       onDisconnected={() => {
-        setError("Disconnected from LiveKit room. Please check your credentials or network connection.");
+        setError("Yayın bağlantısı kesildi. Lütfen ağ bağlantınızı kontrol edip tekrar deneyin.");
       }}
     >
       <RoomAudioRenderer />
