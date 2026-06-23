@@ -12,12 +12,24 @@ import {
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
-import LanguageSelector from "./components/LanguageSelector";
+import { motion, AnimatePresence } from "framer-motion";
+import LanguagePicker from "./components/LanguagePicker";
 import VoiceSelector from "./components/VoiceSelector";
 import TranscriptView from "@/components/TranscriptView";
 import VideoStage from "@/components/VideoStage";
 import AudioGate from "@/components/AudioGate";
 import { DEFAULT_VOICE } from "@/lib/voices";
+import AIOrb, { type OrbState } from "@/design-system/AIOrb";
+import AmbientBlobs from "@/design-system/AmbientBlobs";
+import {
+  Hand,
+  Mic,
+  LogOut,
+  Loader2,
+  Languages,
+  AudioLines,
+  Radio,
+} from "lucide-react";
 
 type SpeakState = "idle" | "requested" | "speaking";
 
@@ -32,6 +44,9 @@ function SpeakControl({
   const { localParticipant } = useLocalParticipant();
   const [state, setState] = useState<SpeakState>("idle");
   const [busy, setBusy] = useState(false);
+  // True while we're acquiring the mic after being granted the floor —
+  // there's a real gap, so we show feedback instead of a dead button.
+  const [activating, setActivating] = useState(false);
 
   // Track whether the server has granted publish permission.
   const canPublish = !!localParticipant?.permissions?.canPublish;
@@ -53,12 +68,15 @@ function SpeakControl({
     };
   }, [room]);
 
-  // When the organizer grants the floor, auto-enable the mic.
+  // When the organizer grants the floor, auto-enable the mic — with a visible
+  // "activating" state during the (real) acquisition gap.
   useEffect(() => {
-    if (canPublish) {
-      setState("speaking");
-      localParticipant?.setMicrophoneEnabled(true).catch(() => {});
-    }
+    if (!canPublish) return;
+    setState("speaking");
+    setActivating(true);
+    Promise.resolve(localParticipant?.setMicrophoneEnabled(true))
+      .catch(() => {})
+      .finally(() => setActivating(false));
   }, [canPublish, localParticipant]);
 
   const post = useCallback(
@@ -99,71 +117,90 @@ function SpeakControl({
 
   return (
     <div>
-      <span className="label" style={{ display: "block", marginBottom: 12 }}>
-        Konuşma
+      <span className="label" style={{ marginBottom: 12 }}>
+        <Mic size={13} /> Konuşma
       </span>
 
-        {state === "speaking" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={state}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.22, ease: "easeOut" }}
+        >
+          {state === "speaking" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {activating ? (
+            <span className="loading-pill">
+              <span className="spinner spinner-sm" />
+              Mikrofonunuz açılıyor<span className="dots" />
+            </span>
+          ) : (
             <span className="status status--active">
               <span className="status-dot pulse" />
-              Söz sizde — mikrofonunuzu açabilirsiniz
+              Söz sizde
             </span>
-            <TrackToggle
-              source={Track.Source.Microphone}
-              style={{
-                width: "100%",
-                padding: "14px 24px",
-                fontFamily: "var(--font-body)",
-                fontSize: 14,
-                fontWeight: 500,
-                border: "none",
-                borderRadius: 0,
-                background: "var(--fg)",
-                color: "var(--bg)",
-                cursor: "pointer",
-              }}
-            />
-            <TrackToggle
-              source={Track.Source.ScreenShare}
-              captureOptions={{ audio: true }}
-              style={{
-                width: "100%",
-                padding: "12px 24px",
-                fontFamily: "var(--font-body)",
-                fontSize: 14,
-                fontWeight: 500,
-                border: "1px solid var(--fg)",
-                borderRadius: 0,
-                background: "transparent",
-                color: "var(--fg)",
-                cursor: "pointer",
-              }}
-            />
-            <button className="btn btn-outline" onClick={leaveStage} disabled={busy}>
-              Sözü bırak
-            </button>
-          </div>
-        ) : state === "requested" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <span className="status status--waiting">
-              <span className="status-dot pulse" />
-              İstek gönderildi — sahibin onayı bekleniyor
-            </span>
-            <button className="btn btn-outline" onClick={cancelRequest} disabled={busy}>
-              İsteği iptal et
-            </button>
-          </div>
-        ) : (
-          <button
-            className="btn"
-            onClick={requestFloor}
-            disabled={busy}
-            style={{ width: "100%" }}
-          >
-            ✋ Söz iste
+          )}
+          <TrackToggle
+            source={Track.Source.Microphone}
+            style={{
+              width: "100%",
+              padding: "14px 24px",
+              fontFamily: "var(--font-body)",
+              fontSize: 14,
+              fontWeight: 600,
+              border: "none",
+              borderRadius: 11,
+              background: "var(--fg)",
+              color: "#0A0D14",
+              cursor: "pointer",
+            }}
+          />
+          <TrackToggle
+            source={Track.Source.ScreenShare}
+            captureOptions={{ audio: true }}
+            style={{
+              width: "100%",
+              padding: "12px 24px",
+              fontFamily: "var(--font-body)",
+              fontSize: 14,
+              fontWeight: 500,
+              border: "1px solid var(--border)",
+              borderRadius: 11,
+              background: "rgba(255,255,255,0.02)",
+              color: "var(--fg)",
+              cursor: "pointer",
+            }}
+          />
+          <button className="btn btn-outline" onClick={leaveStage} disabled={busy}>
+            {busy ? <span className="spinner spinner-sm" /> : <LogOut size={16} />}
+            Sözü bırak
           </button>
-        )}
+        </div>
+      ) : state === "requested" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <span className="loading-pill" style={{ color: "var(--warning)", background: "var(--warning-soft)", borderColor: "rgba(251,191,36,0.22)" }}>
+            <Loader2 size={14} className="spin-ico" />
+            Onay bekleniyor<span className="dots" />
+          </span>
+          <button className="btn btn-outline" onClick={cancelRequest} disabled={busy}>
+            İsteği iptal et
+          </button>
+        </div>
+      ) : (
+        <button
+          className="btn btn-primary"
+          onClick={requestFloor}
+          disabled={busy}
+          style={{ width: "100%" }}
+        >
+          {busy ? <span className="spinner spinner-sm spinner-dark" /> : <Hand size={16} />}
+          Söz iste
+        </button>
+          )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -181,6 +218,9 @@ function AttendeeView({
   // Each listener picks the voice they hear the translation in.
   const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
+  // True while the translation pipeline for the chosen (language, voice) spins
+  // up — covers the real delay between selecting and hearing audio.
+  const [preparing, setPreparing] = useState(false);
   const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
 
@@ -195,12 +235,18 @@ function AttendeeView({
   // Keep a bridge alive for the selected (language, voice) while selected.
   // Cleanup unsubscribes on change/unmount (strict-mode safe: sub→unsub→sub).
   useEffect(() => {
-    if (language === "original") return;
+    if (language === "original") {
+      setPreparing(false);
+      return;
+    }
+    setPreparing(true);
     fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, targetLanguage: language, voice }),
-    }).catch(() => {});
+    })
+      .catch(() => {})
+      .finally(() => setPreparing(false));
     return () => {
       fetch("/api/translate/unsubscribe", {
         method: "POST",
@@ -284,24 +330,40 @@ function AttendeeView({
   }, [audioTracks, language, voice, ownTranslator]);
 
   const isConnected = organizerParticipant !== undefined;
+  const orbState: OrbState = !isConnected
+    ? "connecting"
+    : preparing
+    ? "translating"
+    : isReceivingAudio
+    ? "speaking"
+    : "idle";
 
   return (
-    <div className="stage enter">
+    <div className="stage stage--listener enter">
+      <AmbientBlobs />
       {/* Header */}
       <div className="stage-header">
-        <div>
-          <h1 className="display display-md" style={{ marginBottom: 2 }}>
-            <em>Listening</em>
-          </h1>
-          <p className="mono">{sessionId}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <AIOrb size={46} state={orbState} />
+          <div style={{ minWidth: 0 }}>
+            <h1 className="display display-md" style={{ marginBottom: 1 }}>
+              Dinleme
+            </h1>
+            <p className="mono">{sessionId}</p>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div className={`waveform ${isReceivingAudio ? "active" : "idle"}`}>
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="waveform-bar" />
             ))}
           </div>
-          {isConnected ? (
+          {preparing ? (
+            <span className="loading-pill">
+              <span className="spinner spinner-sm" />
+              Çeviri hazırlanıyor<span className="dots" />
+            </span>
+          ) : isConnected ? (
             <span className="status status--active">
               <span className="status-dot pulse" />
               {language === "original" ? "Orijinal" : language.toUpperCase()}
@@ -321,25 +383,26 @@ function AttendeeView({
         <div className="stage-col stage-col--scroll">
           <VideoStage />
 
-          <div className="panel">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Dil
-            </span>
-            <LanguageSelector
-              currentLanguage={language}
-              onLanguageChange={setLanguage}
-            />
-          </div>
-
-          <div className="panel">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Çeviri sesi
-            </span>
-            <VoiceSelector
-              currentVoice={voice}
-              onVoiceChange={setVoice}
-              disabled={language === "original"}
-            />
+          <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <span className="label" style={{ marginBottom: 10 }}>
+                <Languages size={13} /> Dil
+              </span>
+              <LanguagePicker
+                currentLanguage={language}
+                onLanguageChange={setLanguage}
+              />
+            </div>
+            <div>
+              <span className="label" style={{ marginBottom: 10 }}>
+                <AudioLines size={13} /> Çeviri sesi
+              </span>
+              <VoiceSelector
+                currentVoice={voice}
+                onVoiceChange={setVoice}
+                disabled={language === "original"}
+              />
+            </div>
           </div>
 
           <div className="panel">
@@ -350,10 +413,10 @@ function AttendeeView({
         {/* Right column: transcript (scrolls internally) */}
         <div className="stage-col">
           <div className="panel panel--fill">
-            <span className="label" style={{ display: "block", marginBottom: 12 }}>
-              Metin (konuşulan + çeviri)
+            <span className="label" style={{ marginBottom: 12 }}>
+              <Radio size={13} /> Canlı metin
             </span>
-            <TranscriptView language={language} voice={voice} excludeSpeaker={identity} />
+            <TranscriptView language={language} voice={voice} />
           </div>
         </div>
       </div>
@@ -398,14 +461,14 @@ export default function WatchPage({
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
           <p className="display display-md" style={{ marginBottom: 16 }}>
-            Something went wrong
+            Bir sorun oluştu
           </p>
           <p className="body-sm" style={{ marginBottom: 32 }}>{error}</p>
           <button
             className="btn btn-outline"
             onClick={() => window.location.reload()}
           >
-            Retry
+            Tekrar dene
           </button>
         </div>
       </div>
@@ -417,7 +480,7 @@ export default function WatchPage({
       <div className="page">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div className="spinner" />
-          <p className="mono">Joining…</p>
+          <p className="mono">Bağlanılıyor…</p>
         </div>
       </div>
     );
@@ -428,19 +491,19 @@ export default function WatchPage({
       <div className="page">
         <div className="container enter" style={{ textAlign: "center" }}>
           <h1 className="display display-lg" style={{ marginBottom: 12 }}>
-            <em>Ready</em>
+            Hazır
           </h1>
-          <p className="body-sm" style={{ marginBottom: 40 }}>
-            Tap below to join the broadcast and enable audio.
+          <p className="body" style={{ marginBottom: 36 }}>
+            Yayına katılmak ve sesi etkinleştirmek için dokunun.
           </p>
           <button
-            className="btn"
+            className="btn btn-primary"
             onClick={() => setStarted(true)}
           >
-            Start listening
+            Dinlemeye başla
           </button>
           <p className="mono" style={{ marginTop: 32, fontSize: 12 }}>
-            Session {sessionId}
+            Oturum {sessionId}
           </p>
         </div>
       </div>

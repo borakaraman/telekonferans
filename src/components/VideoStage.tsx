@@ -2,6 +2,7 @@
 
 import { useTracks, VideoTrack } from "@livekit/components-react";
 import { Track } from "livekit-client";
+import { MonitorUp } from "lucide-react";
 
 /**
  * Renders the screen-share video of every speaker (organizer + anyone given
@@ -34,9 +35,10 @@ export default function VideoStage() {
           style={{
             position: "relative",
             background: "#000",
-            borderRadius: 4,
+            borderRadius: 14,
             overflow: "hidden",
             aspectRatio: "16 / 9",
+            border: "1px solid var(--panel-border)",
           }}
         >
           <VideoTrack
@@ -47,17 +49,21 @@ export default function VideoStage() {
             className="mono"
             style={{
               position: "absolute",
-              left: 8,
-              bottom: 8,
-              padding: "2px 8px",
+              left: 10,
+              bottom: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "4px 10px",
               fontSize: 11,
               color: "#fff",
-              background: "rgba(0,0,0,0.5)",
-              borderRadius: 2,
+              background: "rgba(0,0,0,0.55)",
+              backdropFilter: "blur(6px)",
+              borderRadius: 999,
             }}
           >
-            {(t.participant.isLocal ? "Siz" : t.participant.identity) +
-              (t.source === Track.Source.ScreenShare ? " · ekran" : "")}
+            {t.source === Track.Source.ScreenShare && <MonitorUp size={12} />}
+            {t.participant.isLocal ? "Siz" : t.participant.identity}
           </span>
         </div>
       ))}

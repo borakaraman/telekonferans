@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Live Translate",
+  title: "Telekonferans — Canlı Çeviri",
   description:
-    "Real-time broadcast translation powered by the Gemini Live API.",
+    "Gerçek zamanlı, çok dilli yayın çevirisi. Herkes kendi dilinde dinler.",
 };
 
 export default function RootLayout({

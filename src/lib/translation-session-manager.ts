@@ -50,6 +50,10 @@ interface LanguageGroup {
   voice: string;
   subscriberCount: number;
   bridges: Map<string, TranslationBridge>; // keyed by speaker identity
+  // Pending debounced teardown (set when subscriberCount hits 0). Cleared if a
+  // new subscriber arrives first — prevents strict-mode/rapid-switch churn from
+  // tearing down a bridge mid-start (which left a language with no audio).
+  teardownTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Map key for a (language, voice) group. Neither part contains "::". */
@@ -264,8 +268,13 @@ class TranslationSessionManager {
     const key = groupKey(targetLanguage, voice);
     let group = langMap.get(key);
     if (!group) {
-      group = { language: targetLanguage, voice, subscriberCount: 0, bridges: new Map() };
+      group = { language: targetLanguage, voice, subscriberCount: 0, bridges: new Map(), teardownTimer: null };
       langMap.set(key, group);
+    }
+    // Cancel any pending teardown — this group is wanted again.
+    if (group.teardownTimer) {
+      clearTimeout(group.teardownTimer);
+      group.teardownTimer = null;
     }
     group.subscriberCount++;
 
@@ -331,16 +340,32 @@ class TranslationSessionManager {
     );
 
     if (group.subscriberCount === 0) {
-      console.log(
-        `[SessionManager] No more subscribers for ${targetLanguage}/${voice}, tearing down ${group.bridges.size} bridge(s)`
-      );
-      for (const [, bridge] of group.bridges) {
-        await bridge.stop();
-      }
-      langMap.delete(key);
-      if (langMap.size === 0) {
-        this.translations.delete(sessionId);
-      }
+      // Debounce teardown: keep the bridge warm briefly so a quick re-subscribe
+      // (strict-mode remount, language toggle) reuses it instead of churning.
+      if (group.teardownTimer) clearTimeout(group.teardownTimer);
+      group.teardownTimer = setTimeout(() => {
+        void this.teardownGroup(sessionId, key);
+      }, 1500);
+    }
+  }
+
+  /** Actually tear down a (language, voice) group once it has stayed idle. */
+  private async teardownGroup(sessionId: string, key: string): Promise<void> {
+    const langMap = this.translations.get(sessionId);
+    const group = langMap?.get(key);
+    if (!langMap || !group) return;
+    group.teardownTimer = null;
+    if (group.subscriberCount > 0) return; // someone re-subscribed in the window
+
+    console.log(
+      `[SessionManager] Tearing down ${key} in ${sessionId} (${group.bridges.size} bridge(s))`
+    );
+    for (const [, bridge] of group.bridges) {
+      await bridge.stop();
+    }
+    langMap.delete(key);
+    if (langMap.size === 0) {
+      this.translations.delete(sessionId);
     }
   }
 
