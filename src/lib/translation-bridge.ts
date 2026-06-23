@@ -24,6 +24,7 @@ import {
   AudioStream,
 } from "@livekit/rtc-node";
 import WebSocket from "ws";
+import { SpeechVad } from "@/lib/audio-vad";
 
 export type BridgeStatus = "starting" | "active" | "error" | "closed";
 
@@ -67,6 +68,7 @@ export class TranslationBridge {
   private activeReader: ReadableStreamDefaultReader<AudioFrame> | null = null;
   // TrackSource of the audio currently piped to Gemini (-1 = none).
   private activeSource: number = -1;
+  private readonly speechVad = new SpeechVad();
 
   constructor(
     sessionId: string,
@@ -141,6 +143,7 @@ export class TranslationBridge {
     this.audioSource = null;
     this.localTrack = null;
     this.geminiSetupComplete = false;
+    this.endSpeechIfActive();
   }
 
   private async joinLiveKitRoom(): Promise<void> {
@@ -361,8 +364,9 @@ export class TranslationBridge {
         },
         realtimeInputConfig: {
           automaticActivityDetection: {
-            disabled: false,
+            disabled: true,
           },
+          turnCoverage: "TURN_INCLUDES_ONLY_ACTIVITY",
         },
       },
     };
@@ -679,6 +683,7 @@ export class TranslationBridge {
       })
       .finally(() => {
         // This source ended (track unpublished or we cancelled to switch).
+        this.endSpeechIfActive();
         this.isPiping = false;
         this.activeSource = -1;
         this.activeReader = null;
@@ -698,29 +703,82 @@ export class TranslationBridge {
       return;
     }
 
+    const action = this.speechVad.process(frame.data);
+
+    switch (action.type) {
+      case "drop":
+        return;
+      case "begin":
+        this.sendGeminiActivity("start");
+        for (const prelude of action.prelude) {
+          this.sendRawAudioToGemini(prelude);
+        }
+        this.sendRawAudioToGemini(frame.data);
+        return;
+      case "relay":
+        this.sendRawAudioToGemini(frame.data);
+        return;
+      case "finish":
+        this.sendGeminiActivity("end");
+        return;
+    }
+  }
+
+  private sendGeminiActivity(phase: "start" | "end"): void {
+    if (
+      !this.geminiWs ||
+      this.geminiWs.readyState !== WebSocket.OPEN ||
+      !this.geminiSetupComplete
+    ) {
+      return;
+    }
+
+    const key = phase === "start" ? "activityStart" : "activityEnd";
+    this.geminiWs.send(JSON.stringify({ realtimeInput: { [key]: {} } }));
+    console.log(
+      `[TranslationBridge:${this.targetLanguage}] Gemini ${key}`
+    );
+  }
+
+  private endSpeechIfActive(): void {
+    if (!this.speechVad.isSpeaking()) {
+      this.speechVad.reset();
+      return;
+    }
+    this.sendGeminiActivity("end");
+    this.speechVad.reset();
+  }
+
+  private sendRawAudioToGemini(samples: Int16Array): void {
+    if (
+      !this.geminiWs ||
+      this.geminiWs.readyState !== WebSocket.OPEN ||
+      !this.geminiSetupComplete
+    ) {
+      return;
+    }
+
     try {
-      // Convert AudioFrame's Int16Array data to base64
-      const int16Data = frame.data;
-      const buffer = Buffer.from(int16Data.buffer, int16Data.byteOffset, int16Data.byteLength);
+      const buffer = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
       const base64 = buffer.toString("base64");
 
       this.framesSentToGemini++;
       if (this.framesSentToGemini <= 3 || this.framesSentToGemini % 500 === 0) {
         console.log(
-          `[TranslationBridge:${this.targetLanguage}] Sent audio frame #${this.framesSentToGemini} to Gemini (${base64.length} bytes base64, ${int16Data.length} samples)`
+          `[TranslationBridge:${this.targetLanguage}] Sent audio frame #${this.framesSentToGemini} to Gemini (${base64.length} bytes base64, ${samples.length} samples)`
         );
       }
 
-      const message = {
-        realtimeInput: {
-          audio: {
-            mimeType: `audio/pcm;rate=${this.inputSampleRate}`,
-            data: base64,
+      this.geminiWs.send(
+        JSON.stringify({
+          realtimeInput: {
+            audio: {
+              mimeType: `audio/pcm;rate=${this.inputSampleRate}`,
+              data: base64,
+            },
           },
-        },
-      };
-
-      this.geminiWs.send(JSON.stringify(message));
+        })
+      );
     } catch (error) {
       console.error(
         `[TranslationBridge:${this.targetLanguage}] Error sending audio to Gemini:`,
