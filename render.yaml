@@ -1,0 +1,23 @@
+# Render Blueprint — one-click deploy of the always-on app server.
+# Render dashboard: New → Blueprint → connect this repo → fill the 5 secret
+# env vars (they're marked sync:false so they aren't stored in git).
+services:
+  - type: web
+    name: telekonferans
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: NEXT_PUBLIC_LIVEKIT_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

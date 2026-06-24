@@ -223,6 +223,10 @@ function AttendeeView({
   const [preparing, setPreparing] = useState(false);
   const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
+  const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: true }).filter(
+    (t) => t.publication && !t.participant.identity.startsWith("translator-")
+  );
+  const sharing = screenShares.length > 0;
 
   const organizerParticipant = remoteParticipants.find((p) =>
     p.identity.startsWith("organizer-")
@@ -381,7 +385,11 @@ function AttendeeView({
       <div className="stage-body">
         {/* Left column: video + controls */}
         <div className="stage-col stage-col--scroll">
-          <VideoStage />
+          {sharing && (
+            <div className="video-box">
+              <VideoStage />
+            </div>
+          )}
 
           <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>

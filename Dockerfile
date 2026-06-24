@@ -20,6 +20,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=8080
+# Bind to all interfaces so hosts like Render/Cloud Run can reach the server.
+# (Next standalone otherwise may bind to localhost only.) Render overrides PORT.
+ENV HOSTNAME=0.0.0.0
 
 # Copy standalone server + static assets
 COPY --from=builder /app/.next/standalone ./

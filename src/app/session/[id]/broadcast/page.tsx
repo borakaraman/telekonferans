@@ -206,6 +206,10 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
   const audioTracks = useTracks([Track.Source.Microphone]);
+  const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: true }).filter(
+    (t) => t.publication && !t.participant.identity.startsWith("translator-")
+  );
+  const sharing = screenShares.length > 0;
   const remoteParticipants = useRemoteParticipants();
 
   // The organizer picks a language to hear other speakers translated (default
@@ -480,15 +484,28 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
           <InviteDialog url={joinUrl} />
         </div>
 
-        {/* Main — screen share (if any) + dominant live transcript */}
+        {/* Main — when sharing: screen + transcript side by side; else transcript full */}
         <div className="stage-col">
-          <VideoStage />
-          <div className="panel panel--fill">
-            <span className="label" style={{ marginBottom: 12 }}>
-              <Radio size={13} /> Canlı metin
-            </span>
-            <TranscriptView language={listenLanguage} voice={listenVoice} />
-          </div>
+          {sharing ? (
+            <div className="split-row">
+              <div className="split-video">
+                <VideoStage />
+              </div>
+              <div className="panel panel--fill">
+                <span className="label" style={{ marginBottom: 12 }}>
+                  <Radio size={13} /> Canlı metin
+                </span>
+                <TranscriptView language={listenLanguage} voice={listenVoice} />
+              </div>
+            </div>
+          ) : (
+            <div className="panel panel--fill">
+              <span className="label" style={{ marginBottom: 12 }}>
+                <Radio size={13} /> Canlı metin
+              </span>
+              <TranscriptView language={listenLanguage} voice={listenVoice} />
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -14,7 +14,8 @@ echo Sunucunun hazir olmasi icin bekleniyor (8 sn)...
 timeout /t 8 /nobreak >nul
 
 echo Tunel baslatiliyor...
-start "Telekonferans - Tunel" cmd /k "cloudflared tunnel --url http://localhost:3000"
+REM --protocol http2: bu agda UDP/QUIC engelli oldugundan TCP/HTTP2 kullaniyoruz
+start "Telekonferans - Tunel" cmd /k "cloudflared tunnel --protocol http2 --url http://localhost:3000"
 
 echo.
 echo ============================================================

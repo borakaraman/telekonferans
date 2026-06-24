@@ -239,6 +239,35 @@ body::after {
   grid-template-columns: 340px minmax(0, 1fr);
 }
 
+/* Host main when sharing: screen + transcript side by side */
+.split-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+}
+.split-video {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+/* Listener: full-width 16:9 screen box */
+.video-box {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  /* stack screen above transcript on narrow screens */
+  .split-row { flex-direction: column; }
+  .split-video {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-height: 0;
+  }
+}
+
 /* Compact pill (active translations etc.) */
 .chip {
   display: inline-flex;

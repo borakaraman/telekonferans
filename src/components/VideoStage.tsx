@@ -20,13 +20,16 @@ export default function VideoStage() {
   if (tracks.length === 0) return null;
 
   return (
+    // Fills whatever box the parent provides (full-width 16:9 on the listener,
+    // a full-height half on the host's side-by-side layout). The parent owns
+    // the dimensions; tiles letterbox (contain) so the whole screen stays visible.
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: tracks.length > 1 ? "1fr 1fr" : "1fr",
-        gap: 8,
         width: "100%",
-        marginBottom: 24,
+        height: "100%",
+        display: "flex",
+        gap: 8,
+        minHeight: 0,
       }}
     >
       {tracks.map((t) => (
@@ -34,16 +37,18 @@ export default function VideoStage() {
           key={t.publication!.trackSid}
           style={{
             position: "relative",
+            flex: 1,
+            minWidth: 0,
+            height: "100%",
             background: "#000",
             borderRadius: 14,
             overflow: "hidden",
-            aspectRatio: "16 / 9",
             border: "1px solid var(--panel-border)",
           }}
         >
           <VideoTrack
             trackRef={t}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
           <span
             className="mono"
